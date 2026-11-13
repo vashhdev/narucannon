@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "narucanon-mpv"
+name = "narucannon-mpv"
 version = "1.0.0"
 description = "Stream the NaruCannon Recut (canon-only Naruto and Shippuden) in mpv - interactive picker, zero dependencies."
 readme = "README.md"
@@ -20,8 +20,8 @@ classifiers = [
 dependencies = []  # stdlib only, by design
 
 [project.urls]
-Homepage = "https://github.com/vashhdev/narucanon"
-Issues = "https://github.com/vashhdev/narucanon/issues"
+Homepage = "https://github.com/vashhdev/narucannon"
+Issues = "https://github.com/vashhdev/narucannon/issues"
 
 [project.scripts]
 naru = "naru:main"

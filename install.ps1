@@ -1,5 +1,5 @@
 # naru installer for Windows:
-#   irm https://raw.githubusercontent.com/vashhdev/narucanon/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/vashhdev/narucannon/main/install.ps1 | iex
 # installs uv (which fetches its own Python if you have none), then naru, then mpv.
 # re-run it any time to update.
 #
@@ -10,7 +10,7 @@
     # judge every step by its exit code. "Stop" would make Windows PowerShell 5.1 treat
     # uv's normal progress output on stderr as fatal whenever output is redirected
     $ErrorActionPreference = "Continue"
-    $pkg = "narucanon-mpv @ https://github.com/vashhdev/narucanon/archive/refs/heads/main.zip"
+    $pkg = "narucannon-mpv @ https://github.com/vashhdev/narucannon/archive/refs/heads/main.zip"
     if ($env:NARU_PKG) { $pkg = $env:NARU_PKG }
 
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {

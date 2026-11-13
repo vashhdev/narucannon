@@ -1161,10 +1161,10 @@ def watch(cmd, arcs, eps, idx, lang, start=0.0, stop=None):
 
 
 # what the one-line installers install, and how to run them again
-PACKAGE = "narucanon-mpv @ https://github.com/vashhdev/narucanon/archive/refs/heads/main.zip"
-INSTALLER = ("irm https://raw.githubusercontent.com/vashhdev/narucanon/main/install.ps1 | iex"
+PACKAGE = "narucannon-mpv @ https://github.com/vashhdev/narucannon/archive/refs/heads/main.zip"
+INSTALLER = ("irm https://raw.githubusercontent.com/vashhdev/narucannon/main/install.ps1 | iex"
              if os.name == "nt" else
-             "curl -fsSL https://raw.githubusercontent.com/vashhdev/narucanon/main/install.sh | sh")
+             "curl -fsSL https://raw.githubusercontent.com/vashhdev/narucannon/main/install.sh | sh")
 
 
 def update():
@@ -1324,7 +1324,7 @@ def run():
         first, last = picked[0]["number"], picked[-1]["number"]
         span = str(first) if first == last else f"{first}-{last}"
         name = picked[0]["arc_name"]
-        path = args.m3u or f"narucanon-{slug(name)}-{span}-{lang}.m3u"
+        path = args.m3u or f"narucannon-{slug(name)}-{span}-{lang}.m3u"
         write_m3u(path, entries, f"{NAME} {name} {span} ({lang})")
         print(os.path.abspath(path))
         return

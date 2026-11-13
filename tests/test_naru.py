@@ -310,7 +310,7 @@ class Main(unittest.TestCase):
             finally:
                 os.chdir(here)
             self.assertEqual(code, 0, err)
-            self.assertTrue(out.strip().endswith("narucanon-chunin-exams-1-2-dub.m3u"))
+            self.assertTrue(out.strip().endswith("narucannon-chunin-exams-1-2-dub.m3u"))
         self.assertTrue(text.startswith("#EXTM3U\n#PLAYLIST:NaruCannon Land of Waves 1-3 (sub)\n"))
         self.assertIn("#EXTINF:-1,Land of Waves 02\n" + naru.stream_url(EPS[1]), text)
         self.assertEqual(text.count("#EXTINF"), 3)

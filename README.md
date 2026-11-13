@@ -1,6 +1,6 @@
-# narucanon
+# narucannon
 
-[![CI](https://github.com/vashhdev/narucanon/actions/workflows/ci.yml/badge.svg)](https://github.com/vashhdev/narucanon/actions/workflows/ci.yml)
+[![CI](https://github.com/vashhdev/narucannon/actions/workflows/ci.yml/badge.svg)](https://github.com/vashhdev/narucannon/actions/workflows/ci.yml)
 
 Stream the **NaruCannon Recut** straight into [mpv](https://mpv.io): Naruto and Naruto Shippuden with the filler cut out, 242 episodes over 13 arcs, in English dub or Japanese with English subs. Pick an arc and an episode, and one mpv window plays on from there, arc after arc, hands-free. The command is `naru`.
 
@@ -21,13 +21,13 @@ The NaruCannon Recut has no website or player, just two pixeldrain folders ([sub
 **Windows** (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/vashhdev/narucanon/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/vashhdev/narucannon/main/install.ps1 | iex
 ```
 
 **macOS / Linux / Steam Deck / Android (Termux)**:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vashhdev/narucanon/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/vashhdev/narucannon/main/install.sh | sh
 ```
 
 The installer:
@@ -43,7 +43,7 @@ Then open a new terminal and run `naru`. To update later, run `naru --update` (o
 If you already have Python 3.8+:
 
 ```bash
-uv tool install git+https://github.com/vashhdev/narucanon     # or: pipx install git+https://github.com/vashhdev/narucanon
+uv tool install git+https://github.com/vashhdev/narucannon     # or: pipx install git+https://github.com/vashhdev/narucannon
 naru --setup                                                   # find or install mpv
 ```
 

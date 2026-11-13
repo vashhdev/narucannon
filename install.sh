@@ -1,6 +1,6 @@
 #!/bin/sh
 # naru installer for macOS, Linux and Android (Termux):
-#   curl -fsSL https://raw.githubusercontent.com/vashhdev/narucanon/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/vashhdev/narucannon/main/install.sh | sh
 # installs uv (which fetches its own Python if you have none), then naru, then mpv.
 # re-run it any time to update.
 #
@@ -9,7 +9,7 @@
 #   NARU_YES=1                            install mpv without asking
 set -e
 
-PKG="${NARU_PKG:-narucanon-mpv @ https://github.com/vashhdev/narucanon/archive/refs/heads/main.zip}"
+PKG="${NARU_PKG:-narucannon-mpv @ https://github.com/vashhdev/narucannon/archive/refs/heads/main.zip}"
 
 termux=""
 if [ -n "${TERMUX_VERSION:-}" ]; then termux=1; fi
