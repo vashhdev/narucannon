@@ -3,6 +3,24 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org).
 
+## [1.1.0] - 2026-11-14
+
+### Added
+
+- **Android binges too.** mpv-android now gets everything from your episode on as
+  one playlist, arc after arc (or just the range you asked for), so it plays on by
+  itself instead of stopping after each episode. When you're back in Termux, naru
+  asks which episode you stopped in, so plain `naru` continues from there.
+- **Opening and ending skip on Android.** `naru --mpv-conf` prints a profile for
+  mpv-android's mpv.conf (Settings > Advanced > Edit mpv.conf) that skips the
+  opening and goes from the ending to the next episode, like on desktop. Seek into
+  either yourself and it plays. `naru --setup` on Termux explains how.
+
+### Changed
+
+- On Android, a resume position and an episode range (`naru pain 3-9`) are passed on
+  to mpv-android. They used to be ignored there.
+
 ## [1.0.0] - 2026-11-13
 
 ### Added

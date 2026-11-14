@@ -30,7 +30,8 @@ Usage:
 Players:
   desktop : mpv, installed on first run if missing (winget/scoop/choco, brew/port,
             apt/dnf/pacman/zypper/apk/xbps/nix, flatpak as a last resort)
-  android : under Termux, episodes open in the mpv-android app (is.xyz.mpv)
+  android : under Termux, the mpv-android app (is.xyz.mpv) gets the episodes as one
+            playlist; `naru --mpv-conf` is its opening and ending skipper
 
 Interactive controls:
   pickers : type to narrow the list, up/down arrows to move, Enter to select, Esc to cancel
@@ -38,6 +39,7 @@ Interactive controls:
 """
 
 import argparse
+import base64
 import codecs
 import glob
 import json
@@ -56,7 +58,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 NAME = "NaruCannon"
 API = "https://pixeldrain.net/api/filesystem/"
@@ -649,14 +651,6 @@ def write_m3u(path, entries, title):
         fh.write("\n".join(lines) + "\n")
 
 
-def launch(cmd, url, title):
-    """play one episode. cmd = mpv argv prefix, or None on Android (mpv-android app)."""
-    if cmd is None:
-        android_open(url)
-    else:
-        subprocess.run([*cmd, f"--force-media-title={title}", url])
-
-
 # ------------------------------------------------------------------ history
 # where you left off, for sub and dub separately, and the last volume, so plain
 # `naru` can offer "Pain's Assault 07 (dub) at 12:34" and mpv reopens as loud as it was.
@@ -966,40 +960,27 @@ def binge(cmd, arcs, eps, idx, lang, start=0.0, stop=None):
             idx, stop = got, None
 
 
-def play_loop(cmd, arcs, eps, idx, lang):
-    """Android (mpv-android takes one url at a time and can't be followed): open
-    eps[idx], then offer next/replay/previous."""
-    while True:
-        ep = eps[idx]
-        title = ep_title(ep)
-        sys.stderr.write(f"{title}  ({lang}, {human(ep['size'])})\n")
-        launch(cmd, stream_url(ep), title)
-        remember(ep, lang)              # the app reports nothing back: count it watched
-
-        opts = []
-        if idx + 1 < len(eps):
-            opts.append((f"next      {ep_title(eps[idx + 1])}", "next"))
-        opts.append(("replay", "replay"))
-        if idx > 0:
-            opts.append((f"previous  {ep_title(eps[idx - 1])}", "prev"))
-        opts += [("pick episode", "pick"), ("quit", "quit")]
-        default = 0 if opts[0][1] == "next" else len(opts) - 1
-        try:
-            state = "done" if cmd else "opened in mpv-android"
-            choice = opts[menu_pick(opts, default, f"\n{title} {state}:")][1]
-        except EOFError:
-            return
-        if choice == "quit":
-            return
-        if choice == "next":
-            idx += 1
-        elif choice == "prev":
-            idx -= 1
-        elif choice == "pick":
-            got = choose_episode(arcs, eps, lang, idx)
-            if got is None:
-                return
-            idx = got
+def android_binge(eps, idx, lang, start=0.0, stop=None):
+    """Android: mpv-android gets everything from eps[idx] on (to `stop`) as one
+    playlist and plays on by itself, the naru-skip profile skipping openings and
+    endings. the app reports nothing back, so naru asks where you got to."""
+    last = len(eps) - 1 if stop is None else stop
+    queue, ep = eps[idx:last + 1], eps[idx]
+    upto = f" to {ep_title(queue[-1])}" if len(queue) > 1 else ""
+    sys.stderr.write(f"{ep_title(ep)}{upto}  ({lang}), playing in mpv-android\n")
+    android_open(android_playlist(queue), start)
+    remember(ep, lang, start or 0.0)        # "at 0:00": `naru` reopens it, not the next one
+    if len(queue) < 2:
+        return
+    try:
+        got = fuzzy_pick(queue, ep_label, "\nback from mpv-android? pick the episode you "
+                                          f"stopped in, so `naru` continues there "
+                                          f"(Esc: still {ep_title(ep)})", noun="episodes")
+    except EOFError:
+        return
+    if got is not None:
+        remember(got, lang, 0.0)
+        sys.stderr.write(f"saved: `naru` continues from {ep_title(got)}\n")
 
 
 # Termux on Android has no desktop for mpv to open a window on, so episodes go to
@@ -1008,6 +989,57 @@ ANDROID = bool(os.environ.get("TERMUX_VERSION")) or "com.termux" in os.environ.g
 MPV_ANDROID = "is.xyz.mpv/.MPVActivity"
 MPV_ANDROID_HELP = ("install the mpv-android app (is.xyz.mpv) from Google Play or F-Droid: "
                     "https://github.com/mpv-android/mpv-android")
+
+# mpv-android takes no --script and has no IPC, so the desktop skipper can't reach it.
+# but mpv's built-in auto_profiles runs every profile-cond as Lua, with `mp` in reach:
+# this profile, pasted once into the app's mpv.conf, is the Android skipper. like the
+# desktop one, it acts only on what playback runs into: an Opening the file starts
+# in or plays into is skipped, an Ending goes on to the next episode in the playlist
+# (the last one plays out), and one you seek into yourself plays. NaruCannon files only.
+# it lives on one line in mpv.conf, so: no -- comments, and no # (mpv.conf comments)
+ANDROID_SKIP = """\
+(function(_)
+  local s = mp.naru_skip or {}
+  mp.naru_skip = s
+  local path = mp.get_property('path', '')
+  local c = mp.get_property_number('chapter', -1)
+  if s.path ~= path then s.path, s.prev = path, -1 end
+  local prev = s.prev
+  s.prev = c
+  if c < 0 or c ~= prev + 1 or not path:find('NaruCannon', 1, true) then return false end
+  local t = mp.get_property('chapter-list/' .. c .. '/title', '')
+  if t == 'Opening' then
+    mp.commandv('no-osd', 'add', 'chapter', '1')
+    mp.osd_message('skipped the opening', 2)
+  elseif t == 'Ending' and mp.get_property_number('playlist-pos', 0) + 1
+                           < mp.get_property_number('playlist-count', 1) then
+    mp.commandv('playlist-next')
+  end
+  return false
+end)(chapter)"""
+ANDROID_HOWTO = """\
+for mpv-android to skip openings and endings, give it naru's profile once:
+  1. copy what `naru --mpv-conf` prints (or: naru --mpv-conf | termux-clipboard-set)
+  2. in mpv-android: Settings > Advanced > Edit mpv.conf, paste it at the very end, save
+and to resume inside an episode: Settings > General > Save position on quit"""
+
+
+def android_conf():
+    """the [naru-skip] profile for mpv-android's mpv.conf (ANDROID_SKIP on one line:
+    an option can't span lines). the `chapter` it's called with is only there so the
+    profile is re-checked whenever the chapter changes; it reads everything live."""
+    return "[naru-skip]\nprofile-cond=" + " ".join(
+        line.strip() for line in ANDROID_SKIP.splitlines()) + "\n"
+
+
+def android_playlist(queue):
+    """a data: URI of an m3u of these episodes, titles and all. mpv-android plays it as
+    one playlist, and a data: URI needs no file the app would need permission to read."""
+    lines = ["#EXTM3U"]
+    for ep in queue:
+        lines += [f"#EXTINF:-1,{ep_title(ep)}", stream_url(ep)]
+    blob = base64.b64encode(("\n".join(lines) + "\n").encode("utf-8")).decode("ascii")
+    return "data:audio/x-mpegurl;base64," + blob
 
 # os key -> [(package manager, [commands])]. every manager on PATH is offered in
 # order; if one fails the next is tried. ids are checked against each repo:
@@ -1117,11 +1149,13 @@ def ensure_player(mpv, assume_yes=False):
              "open a new terminal, and retry.")
 
 
-def android_open(url):
-    """hand a stream to the mpv-android app. returns at once; the app plays on its own."""
+def android_open(url, start=0.0):
+    """hand a stream or playlist to the mpv-android app, `start` seconds into the
+    first file. returns at once; the app plays on its own."""
+    at = ["--ei", "position", str(int(start * 1000))] if start and start > 0 else []
     try:
         r = subprocess.run(["am", "start", "--user", "0", "-a", "android.intent.action.VIEW",
-                            "-d", url, "-n", MPV_ANDROID], capture_output=True, text=True)
+                            "-d", url, "-n", MPV_ANDROID, *at], capture_output=True, text=True)
     except OSError:
         sys.exit("Termux's `am` command is missing: pkg install termux-am")
     if r.returncode or "Error" in r.stdout + r.stderr:
@@ -1155,7 +1189,7 @@ def continue_prompt(extended=False):
 
 def watch(cmd, arcs, eps, idx, lang, start=0.0, stop=None):
     if cmd is None:
-        play_loop(cmd, arcs, eps, idx, lang)        # mpv-android
+        android_binge(eps, idx, lang, start, stop)  # mpv-android
     else:
         binge(cmd, arcs, eps, idx, lang, start, stop)
 
@@ -1225,6 +1259,9 @@ def run():
                     help="don't skip openings and endings")
     ap.add_argument("--setup", action="store_true",
                     help="find or install mpv and exit (the installers run this)")
+    ap.add_argument("--mpv-conf", action="store_true",
+                    help="print the profile that skips openings and endings in mpv-android, "
+                         "for its mpv.conf, and exit")
     ap.add_argument("-y", "--yes", action="store_true",
                     help="install mpv without asking if it is missing (scripts, CI)")
     ap.add_argument("--update", action="store_true",
@@ -1239,9 +1276,12 @@ def run():
         except AttributeError:
             pass
 
+    if args.mpv_conf:
+        sys.stdout.write(android_conf())
+        return
     if args.setup:
         cmd = ensure_player(args.mpv, args.yes)
-        print(MPV_ANDROID_HELP if cmd is None else f"ready: {' '.join(cmd)}")
+        print(f"{MPV_ANDROID_HELP}\n\n{ANDROID_HOWTO}" if cmd is None else f"ready: {' '.join(cmd)}")
         return
     if args.update:
         update()

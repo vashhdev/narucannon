@@ -124,11 +124,12 @@ jobs:
           # unquoted on purpose: "flatpak run io.mpv.Mpv" has to split into words
           $mpv --vo=null --ao=null --frames=10 av://lavfi:testsrc=duration=1
           # this mpv build runs a whole binge session (episodes appended over its IPC
-          # socket while one plays) and the chapter skipper
+          # socket while one plays), the chapter skipper, and the mpv-android profile
           NARU_TEST_MPV="$mpv" python3 -m unittest -v \
             tests.test_naru.Session.test_real_mpv_plays_a_whole_session_in_one_window \
             tests.test_naru.ChapterSkip.test_real_mpv_skips_the_opening_and_the_ending \
-            tests.test_naru.ChapterSkip.test_real_mpv_rewind_pgdn_and_the_skip_key
+            tests.test_naru.ChapterSkip.test_real_mpv_rewind_pgdn_and_the_skip_key \
+            tests.test_naru.ChapterSkip.test_real_mpv_android_profile
       - name: naru runs, mpv found and plays
         if: runner.os == 'Windows'
         shell: pwsh
@@ -141,12 +142,13 @@ jobs:
           & $mpv --vo=null --ao=null --frames=10 av://lavfi:testsrc=duration=1
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           # this mpv build runs a whole binge session (episodes appended over its IPC
-          # named pipe while one plays) and the chapter skipper
+          # named pipe while one plays), the chapter skipper, and the mpv-android profile
           $env:NARU_TEST_MPV = $mpv
           python -m unittest -v `
             tests.test_naru.Session.test_real_mpv_plays_a_whole_session_in_one_window `
             tests.test_naru.ChapterSkip.test_real_mpv_skips_the_opening_and_the_ending `
-            tests.test_naru.ChapterSkip.test_real_mpv_rewind_pgdn_and_the_skip_key
+            tests.test_naru.ChapterSkip.test_real_mpv_rewind_pgdn_and_the_skip_key `
+            tests.test_naru.ChapterSkip.test_real_mpv_android_profile
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
   ok:

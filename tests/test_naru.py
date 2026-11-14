@@ -6,15 +6,17 @@ offline tests for naru.py: no network, stdlib only.
 pixeldrain is replaced by a fixture folder tree shaped like the real NaruCannon
 shares (arc folders numbered 1 to 12 with a 4.5, an "Extended Episode(s)" folder,
 an accented arc name, a stray .mkv in the dub), so every step runs without touching
-pixeldrain. three tests drive a real mpv when one is installed (a whole binge session
-and two for the chapter skipper), and are skipped otherwise.
+pixeldrain. four tests drive a real mpv when one is installed (a whole binge session,
+two for the chapter skipper and one for mpv-android's), and are skipped otherwise.
 """
 
+import base64
 import contextlib
 import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,6 +26,7 @@ import urllib.parse
 from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CLIP = os.path.join(ROOT, "tests", "fixtures", "clip.mkv")
 sys.path.insert(0, ROOT)
 import naru  # noqa: E402
 
@@ -695,36 +698,63 @@ class Session(unittest.TestCase):
         self.assertEqual(sent.count("loadfile"), 2)                    # 2 and 3 appended
 
 
-class Loop(unittest.TestCase):
-    """mpv-android: one episode at a time, then a menu."""
+class AndroidBinge(unittest.TestCase):
+    """mpv-android: everything from the episode on as one playlist, then where you stopped."""
 
-    def run_loop(self, start, script):
-        launched, menus = [], []
+    def binge(self, idx, pick, start=0.0, stop=None):
+        opened, picks, err = [], [], io.StringIO()
 
-        def menu(opts, default, header):
-            menus.append((opts, default, header))
-            return [v for _, v in opts].index(script.pop(0))
-        with mock.patch.object(naru, "launch", lambda c, u, t: launched.append((u, t))), \
-                mock.patch.object(naru, "menu_pick", menu), \
-                contextlib.redirect_stderr(io.StringIO()):
-            naru.play_loop(None, ARCS, EPS, start, "sub")
-        return launched, menus
+        def fuzzy(items, label, header, noun="items", initial=0):
+            picks.append(([label(i) for i in items], header))
+            return pick(items)
+        with mock.patch.object(naru, "android_open", lambda url, at=0.0: opened.append((url, at))), \
+                mock.patch.object(naru, "fuzzy_pick", fuzzy), contextlib.redirect_stderr(err):
+            naru.android_binge(EPS, idx, "sub", start, stop)
+        return opened, picks, err.getvalue()
 
-    def test_next_replay_previous(self):
+    def playlist(self, url):
+        """(titles, urls) of a data: playlist."""
+        head, blob = url.split(",", 1)
+        self.assertEqual(head, "data:audio/x-mpegurl;base64")
+        lines = base64.b64decode(blob).decode("utf-8").splitlines()
+        self.assertEqual(lines[0], "#EXTM3U")
+        self.assertTrue(all(t.startswith("#EXTINF:-1,") for t in lines[1::2]))
+        return [t.split(",", 1)[1] for t in lines[1::2]], lines[2::2]
+
+    def test_one_playlist_to_the_end_then_where_you_stopped(self):
         forget()
-        launched, menus = self.run_loop(2, ["next", "replay", "prev", "quit"])
-        self.assertEqual([u for u, _ in launched], [naru.stream_url(EPS[i]) for i in (2, 3, 3, 2)])
-        self.assertEqual(launched[1][1], "Chūnin Exams 01")
-        opts, default, header = menus[0]
-        self.assertEqual(opts[default][1], "next")
-        self.assertEqual(header, "\nLand of Waves 03 opened in mpv-android:")
-        self.assertEqual(naru.load_history()["spots"]["sub"]["episode"], 3)   # counted watched
+        opened, picks, err = self.binge(2, lambda items: items[3])
+        (url, start), = opened
+        titles, urls = self.playlist(url)
+        self.assertEqual(titles, [naru.ep_title(e) for e in EPS[2:]])     # on, arc after arc
+        self.assertEqual(titles[1], "Chūnin Exams 01")
+        self.assertEqual(urls, [naru.stream_url(e) for e in EPS[2:]])
+        self.assertEqual(start, 0.0)
+        self.assertIn(f"Land of Waves 03 to {naru.ep_title(EPS[-1])}  (sub), playing in mpv-android", err)
+        labels, header = picks[0]
+        self.assertEqual(labels, [naru.ep_label(e) for e in EPS[2:]])
+        self.assertIn("Esc: still Land of Waves 03", header)
+        # saved at 0:00, so `naru` reopens the episode itself (mpv-android resumes inside it)
+        s = naru.load_history()["spots"]["sub"]
+        self.assertEqual((s["arc"], s["episode"], s["position"]), (EPS[5]["arc"], 1, 0.0))
+        self.assertEqual(naru.resume_point(EPS, "sub", naru.load_history()), (5, 0.0))
+        self.assertIn(f"`naru` continues from {naru.ep_title(EPS[5])}", err)
 
-    def test_defaults_to_quit_on_the_last_episode(self):
-        _, menus = self.run_loop(7, ["quit"])
-        opts, default, _ = menus[0]
-        self.assertEqual(opts[default][1], "quit")
-        self.assertNotIn("next", [v for _, v in opts])
+    def test_esc_keeps_the_episode_it_opened_and_a_range_stops(self):
+        forget()
+        opened, _, err = self.binge(3, lambda items: None, start=12.5, stop=4)
+        (url, start), = opened
+        self.assertEqual(self.playlist(url)[0], ["Chūnin Exams 01", "Chūnin Exams 02"])
+        self.assertEqual(start, 12.5)
+        s = naru.load_history()["spots"]["sub"]
+        self.assertEqual((s["episode"], s["position"]), (1, 12.5))
+        self.assertNotIn("continues from", err)
+
+    def test_one_episode_asks_nothing(self):
+        for idx, stop in ((7, None), (3, 3)):
+            opened, picks, _ = self.binge(idx, lambda items: self.fail("asked"), stop=stop)
+            self.assertEqual(self.playlist(opened[0][0])[0], [naru.ep_title(EPS[idx])])
+            self.assertEqual(picks, [])
 
 
 class ChapterSkip(unittest.TestCase):
@@ -755,18 +785,18 @@ class ChapterSkip(unittest.TestCase):
     # real mpv. episodes are built from the fixture with mpv's edl://, one segment (and
     # so one chapter) per part. NARU_TEST_MPV makes these mandatory (CI's install stage)
 
-    def mpv(self):
+    def mpv(self, config_dir=None):
         forced = os.environ.get("NARU_TEST_MPV")
         cmd = [forced] if forced else naru.find_mpv("mpv")
         if not cmd:
             self.skipTest("mpv not installed")
-        return [*cmd, "--no-config", "--vo=null", "--ao=null", "--really-quiet"]
+        config = [f"--config-dir={config_dir}"] if config_dir else ["--no-config"]
+        return [*cmd, *config, "--vo=null", "--ao=null", "--really-quiet"]
 
-    def edl(self, *parts):
+    def edl(self, *parts, fixture=CLIP):
         """an episode of (chapter title, seconds) parts. mpv drops an edl's last segment
         from this fixture, so a short tail goes after them, named like a preview so
         the skipper never stops there."""
-        fixture = os.path.join(ROOT, "tests", "fixtures", "clip.mkv")
         source = f"%{len(fixture.encode())}%{fixture}"
         return "edl://" + ";".join(f"{source},start=0,length={n},title={t}"
                                    for t, n in parts + (("Preview", 0.5),))
@@ -774,6 +804,52 @@ class ChapterSkip(unittest.TestCase):
     def said(self, log, script="skip_chapters"):
         # (some mpv versions end each log line with a space)
         return re.findall(rf"\[i\]\[{script}\] (.*?) *$", read(log), re.M)
+
+    def test_real_mpv_android_profile(self):
+        # mpv-android's skipper is the --mpv-conf profile in its mpv.conf, which desktop
+        # mpv runs just the same: two episodes laid out like NaruCannon's, in one playlist
+        conf = os.path.join(CACHE.name, "android")
+        os.makedirs(conf, exist_ok=True)
+        _, profile, _ = run_main("--mpv-conf")
+        with open(os.path.join(conf, "mpv.conf"), "w", encoding="utf-8") as fh:
+            fh.write(profile)
+        clip = os.path.join(conf, "[NaruCannon Recut] clip.mkv")     # it only acts on these
+        shutil.copyfile(CLIP, clip)
+        watch = os.path.join(conf, "watch.lua")
+        with open(watch, "w", encoding="utf-8") as fh:
+            fh.write("""
+local n, back = 0, false
+mp.register_event('file-loaded', function() n = n + 1 mp.msg.info('file ' .. n) end)
+mp.register_event('seek', function() mp.msg.info('seek ' .. n) end)
+mp.register_event('end-file', function(e) mp.msg.info('end ' .. n .. ' ' .. e.reason) end)
+local function title() return mp.get_property('chapter-metadata/title', '?') end
+mp.observe_property('chapter', 'number', function(_, c)
+    if not c or c < 0 then return end
+    mp.msg.info('chapter ' .. n .. ' ' .. title())
+    if n == 2 and title() == 'Episode' and not back then
+        back = true             -- back into the opening by hand: it plays
+        mp.commandv('seek', '0.2', 'absolute')
+    end
+end)
+""")
+        episode = self.edl(("Opening", 1.5), ("Episode", 1.5), ("Ending", 1.5), fixture=clip)
+        log = os.path.join(conf, "mpv.log")
+        subprocess.run([*self.mpv(conf), f"--log-file={log}", f"--script={watch}",
+                        episode, episode], timeout=60)
+        said = self.said(log, "watch")
+        one, two = said[:said.index("file 2")], said[said.index("file 2"):]
+        # 1: the opening is skipped (the profile's seek), the ending goes to the next file
+        self.assertEqual(one[:2], ["file 1", "chapter 1 Opening"])
+        self.assertEqual(one.count("seek 1"), 1)
+        self.assertLess(one.index("seek 1"), one.index("chapter 1 Episode"))
+        self.assertLess(one.index("chapter 1 Ending"), one.index("end 1 stop"))
+        # 2, the last: the opening is skipped, but sought back into it plays (two seeks:
+        # the skip and the test's own), and the ending plays out
+        self.assertEqual(two.count("seek 2"), 2, two)
+        back = len(two) - two[::-1].index("seek 2")             # after the test's seek
+        self.assertEqual(two[back:back + 2], ["chapter 2 Opening", "chapter 2 Episode"])
+        self.assertIn("chapter 2 Ending", two)
+        self.assertEqual(said[-1], "end 2 eof")
 
     def test_real_mpv_skips_the_opening_and_the_ending(self):
         # 1 is laid out like NaruCannon's files: Opening from the start, Episode, Ending.
@@ -1022,14 +1098,30 @@ class Android(unittest.TestCase):
             code, out, _ = run_main("--setup")
         self.assertEqual(code, 0)
         self.assertIn("is.xyz.mpv", out)
+        self.assertIn("Settings > Advanced > Edit mpv.conf", out)       # how to add the skipper
+        self.assertIn("naru --mpv-conf", out)
+
+    def test_mpv_conf_is_one_profile_on_one_line(self):
+        code, out, _ = run_main("--mpv-conf")
+        self.assertEqual(code, 0)
+        head, cond, rest = out.split("\n")
+        self.assertEqual((head, rest), ("[naru-skip]", ""))
+        self.assertTrue(cond.startswith("profile-cond=(function(_) local s"))
+        self.assertTrue(cond.endswith(" end)(chapter)"))
+        # one line in mpv.conf: a -- would comment out the rest of the Lua, a # the rest
+        # of the line (mpv.conf comments), and a long dash is a typo
+        for bad in ("--", "#", "\u2013", "\u2014"):
+            self.assertNotIn(bad, cond)
 
     def test_intent_and_errors(self):
         seen = []
         ok = subprocess.CompletedProcess([], 0, "Starting: Intent", "")
         with mock.patch.object(naru.subprocess, "run", lambda c, **k: seen.append(c) or ok):
             naru.android_open("https://x/ep.mp4")
+            naru.android_open("data:audio/x-mpegurl;base64,AA==", 754.25)
         self.assertEqual(seen[0], ["am", "start", "--user", "0", "-a", "android.intent.action.VIEW",
                                    "-d", "https://x/ep.mp4", "-n", "is.xyz.mpv/.MPVActivity"])
+        self.assertEqual(seen[1][-3:], ["--ei", "position", "754250"])     # milliseconds
         bad = subprocess.CompletedProcess([], 0, "", "Error: Activity class does not exist")
         with mock.patch.object(naru.subprocess, "run", return_value=bad), \
                 self.assertRaisesRegex(SystemExit, "mpv-android"):

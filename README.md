@@ -11,7 +11,7 @@ The NaruCannon Recut has no website or player, just two pixeldrain folders ([sub
 - **Zero dependencies** - pure Python standard library.
 - **Interactive picker** - type to filter, `↑`/`↓` to move, `Enter` to select. Accents don't matter: `chunin` finds Chūnin Exams.
 - **Binge mode** - one mpv window keeps going, from the end of one arc into the next. Volume and fullscreen stay put.
-- **Skips openings and endings** - NaruCannon's files mark their Opening and Ending as chapters, so mpv jumps past the opening and from the ending straight into the next episode. `Tab` skips by hand.
+- **Skips openings and endings** - NaruCannon's files mark their Opening and Ending as chapters, so mpv jumps past the opening and from the ending straight into the next episode. `Tab` skips by hand. On Android too, with [one paste](#android) into mpv-android's settings.
 - **Picks up where you left off** - for sub and dub separately. Plain `naru` offers "Pain's Assault 07 (dub) at 12:34", and mpv reopens at your last volume.
 - **Extended cuts** - 7 episodes have a longer cut. `--extended` plays those instead.
 - **Playlists that keep working** - the links never expire, so an `--m3u` made on your computer plays on your phone next week.
@@ -57,7 +57,7 @@ Or just grab the single file and run `python naru.py`. It works without installi
 | macOS | mpv | `brew` (or MacPorts) |
 | Linux | mpv | `apt`, `dnf`, `pacman`, `zypper`, `apk`, `xbps`, or `nix` |
 | Steam Deck, Fedora Silverblue, other immutable distros | mpv (flatpak) | `flatpak install --user io.mpv.Mpv`, no root needed |
-| Android | [mpv-android](https://github.com/mpv-android/mpv-android) app | install it yourself from Google Play or F-Droid; naru runs in [Termux](https://termux.dev) and opens each episode in the app |
+| Android | [mpv-android](https://github.com/mpv-android/mpv-android) app | install it yourself from Google Play or F-Droid; naru runs in [Termux](https://termux.dev) and hands the app the episodes as one playlist (see [Android](#android)) |
 | iOS | none | `--m3u` a playlist on your computer and open it in VLC or Outplayer |
 
 ## Usage
@@ -117,6 +117,7 @@ That's the shares as of November 2026. naru reads the folders every time it star
 | `--mpv PATH`    | path to the mpv binary (default: found automatically)             |
 | `--no-skip`     | play openings and endings instead of skipping them                |
 | `--setup`       | find or install mpv, then exit                                    |
+| `--mpv-conf`    | print the profile that skips openings and endings in mpv-android, for its mpv.conf |
 | `-y`, `--yes`   | install mpv without asking if it's missing (scripts, CI)          |
 | `--update`      | update naru to the newest version (a git checkout says to `git pull` instead) |
 
@@ -134,7 +135,20 @@ That's the shares as of November 2026. naru reads the folders every time it star
 - Episodes queue up one at a time, so `Enter` right after an episode starts may need a second press once the next one is in (a second or so).
 - Where you left off is kept in `%APPDATA%\naru\history.json` on Windows (`~/Library/Application Support/naru` on macOS, `~/.local/state/naru` on Linux). Delete it to forget everything.
 - The episodes are big (roughly 400 MB to 1 GB each) and stream from pixeldrain, which is free and can slow down or turn away very heavy use. If an episode stalls, give it a while and try again.
-- **mpv-android:** naru opens one episode at a time and asks what's next. Or skip Termux: make a playlist on your computer with `naru pain --m3u`, send it to your phone, and open it in mpv-android or VLC.
+
+## Android
+
+naru runs in Termux and plays in the [mpv-android](https://github.com/mpv-android/mpv-android) app. Two settings in the app, once, make it work like the desktop:
+
+1. **Skip openings and endings:** run `naru --mpv-conf` and copy what it prints (or `naru --mpv-conf | termux-clipboard-set`, with the Termux:API app). In mpv-android, open **Settings > Advanced > Edit mpv.conf**, paste it at the very end, and save.
+2. **Resume inside an episode:** turn on **Settings > General > Save position on quit**.
+
+Then:
+
+- naru hands mpv-android everything from your episode on as one playlist (or just the range you asked for), so it plays on by itself, arc after arc. The app's next and previous buttons move through it.
+- The profile skips an opening that playback starts in or runs into, and goes from an ending straight to the next episode. Seek into either yourself and it plays. It acts only on NaruCannon files, and leaves everything else you play in mpv-android alone.
+- mpv-android can't tell naru how far you got, so when you're back in Termux, naru asks which episode you stopped in (`Esc` keeps the one it opened). Plain `naru` continues from there, and mpv-android picks up inside the episode where you left it.
+- Without Termux: make a playlist on your computer with `naru pain --m3u`, send it to your phone, and open it in mpv-android or VLC. With the profile, mpv-android skips there too.
 
 ## How it works
 
@@ -142,11 +156,11 @@ That's the shares as of November 2026. naru reads the folders every time it star
 2. Lists every arc folder in parallel for its episode files, plus the `Extended Episode(s)` folder where there is one. About two seconds for the whole series.
 3. Hands mpv `https://pixeldrain.net/api/filesystem/<share>/<arc>/<file>`, which it streams with range requests, so seeking works and nothing is saved to disk.
 
-The links are plain file paths that never expire, but naru still runs one mpv window per session and talks to it over its JSON IPC (a named pipe on Windows, a socket elsewhere): it adds each next episode while the one before it plays, and reads where you are so it can offer to resume. mpv-android can't be driven that way, so on Android naru opens one episode at a time.
+The links are plain file paths that never expire, but naru still runs one mpv window per session and talks to it over its JSON IPC (a named pipe on Windows, a socket elsewhere): it adds each next episode while the one before it plays, and reads where you are so it can offer to resume. mpv-android can't be driven that way or load scripts, so on Android naru passes the whole queue in one intent, as an m3u playlist in a `data:` URI (no file the app would need permission to read). The skipping there is a profile in the app's mpv.conf: mpv runs a profile's `profile-cond` as Lua whenever the chapter changes, which is enough to skip one.
 
 ## Development
 
-The tests run offline against a fixture folder tree shaped like the real shares (an accented arc name, a 4.5 arc, an extended folder, a stray `.mkv`), so they need no network. Three of them also drive a real mpv (a whole binge session, and two for the opening and ending skip) when one is installed, and are skipped otherwise:
+The tests run offline against a fixture folder tree shaped like the real shares (an accented arc name, a 4.5 arc, an extended folder, a stray `.mkv`), so they need no network. Four of them also drive a real mpv (a whole binge session, two for the opening and ending skip, and one for mpv-android's profile) when one is installed, and are skipped otherwise:
 
 ```bash
 python -m unittest discover -s tests -v
