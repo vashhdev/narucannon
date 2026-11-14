@@ -827,29 +827,32 @@ mp.observe_property('chapter', 'number', function(_, c)
     if not c or c < 0 then return end
     mp.msg.info('chapter ' .. n .. ' ' .. title())
     if n == 2 and title() == 'Episode' and not back then
-        back = true             -- back into the opening by hand: it plays
-        mp.commandv('seek', '0.2', 'absolute')
+        back = true             -- back into the opening by hand: it plays. a moment
+        -- later, or mpv folds this seek into the skip's, which may still be running
+        mp.add_timeout(0.5, function() mp.commandv('seek', '0.2', 'absolute') end)
     end
 end)
 """)
         episode = self.edl(("Opening", 1.5), ("Episode", 1.5), ("Ending", 1.5), fixture=clip)
         log = os.path.join(conf, "mpv.log")
-        subprocess.run([*self.mpv(conf), f"--log-file={log}", f"--script={watch}",
+        # --idle=no: mpv 0.42's mpv.exe idles after the last file when it has no console
+        subprocess.run([*self.mpv(conf), "--idle=no", f"--log-file={log}", f"--script={watch}",
                         episode, episode], timeout=60)
         said = self.said(log, "watch")
         one, two = said[:said.index("file 2")], said[said.index("file 2"):]
-        # 1: the opening is skipped (the profile's seek), the ending goes to the next file
-        self.assertEqual(one[:2], ["file 1", "chapter 1 Opening"])
-        self.assertEqual(one.count("seek 1"), 1)
-        self.assertLess(one.index("seek 1"), one.index("chapter 1 Episode"))
-        self.assertLess(one.index("chapter 1 Ending"), one.index("end 1 stop"))
+        # checked by events (seek, end-file), which mpv never drops. chapters are only
+        # observed, and mpv can fold a quick 0 -> 1 into one change, so the skipped
+        # opening itself may never show up as "chapter 1 Opening"
+        # 1: the opening is skipped (the only seek in it), and the ending ends it early
+        # (stop, not eof): on to the next file
+        self.assertEqual(one.count("seek 1"), 1, said)
+        self.assertEqual(one[-1], "end 1 stop", said)
         # 2, the last: the opening is skipped, but sought back into it plays (two seeks:
-        # the skip and the test's own), and the ending plays out
-        self.assertEqual(two.count("seek 2"), 2, two)
+        # the skip and the test's own, no third), and the ending plays out
+        self.assertEqual(two.count("seek 2"), 2, said)
         back = len(two) - two[::-1].index("seek 2")             # after the test's seek
-        self.assertEqual(two[back:back + 2], ["chapter 2 Opening", "chapter 2 Episode"])
-        self.assertIn("chapter 2 Ending", two)
-        self.assertEqual(said[-1], "end 2 eof")
+        self.assertIn("chapter 2 Opening", two[back:], said)
+        self.assertEqual(said[-1], "end 2 eof", said)
 
     def test_real_mpv_skips_the_opening_and_the_ending(self):
         # 1 is laid out like NaruCannon's files: Opening from the start, Episode, Ending.
